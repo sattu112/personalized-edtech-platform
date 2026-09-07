@@ -2,10 +2,12 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
   Brain, Send, FileText, Sparkles, Loader2, Trash2, MessageSquare, GraduationCap, Lightbulb,
   Upload, ClipboardPaste, File, X, ChevronDown, ChevronUp, CheckCircle2, AlertCircle,
+  Globe, ExternalLink, Search,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   generateSocraticResponse, generatePracticeQA, hasGroqApiKey, getApiStatus, summarizeDocument, sanitizeInput,
+  type WebSearchResult,
 } from '../utils/groqService';
 import {
   processFile, readClipboardText, getAcceptedFileTypes, validateFile, formatFileSize,
@@ -20,6 +22,9 @@ export const TutorView = memo(function TutorView() {
   const { chatHistory, addChatMessage, clearChat } = useApp();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [searchingWeb, setSearchingWeb] = useState(false);
+  const [useWebSearch, setUseWebSearch] = useState(true);
+  const [sourcesByMsg, setSourcesByMsg] = useState<Record<string, WebSearchResult[]>>({});
   const [notesInput, setNotesInput] = useState('');
   const [generatingQA, setGeneratingQA] = useState(false);
   const [generatedQA, setGeneratedQA] = useState<GeneratedQA[]>([]);
@@ -58,15 +63,20 @@ export const TutorView = memo(function TutorView() {
     addChatMessage(userMsg);
     setInput('');
     setSending(true);
+    if (useWebSearch) setSearchingWeb(true);
 
     try {
-      const response = await generateSocraticResponse(safe, [...chatHistory, userMsg]);
+      const result = await generateSocraticResponse(safe, [...chatHistory, userMsg], useWebSearch);
+      const asstId = `msg-${Date.now() + 1}`;
       addChatMessage({
-        id: `msg-${Date.now() + 1}`,
+        id: asstId,
         role: 'assistant',
-        content: response,
+        content: result.content,
         timestamp: Date.now(),
       });
+      if (result.sources.length > 0) {
+        setSourcesByMsg(prev => ({ ...prev, [asstId]: result.sources }));
+      }
     } catch {
       addChatMessage({
         id: `msg-${Date.now() + 1}`,
@@ -75,9 +85,10 @@ export const TutorView = memo(function TutorView() {
         timestamp: Date.now(),
       });
     } finally {
+      setSearchingWeb(false);
       setSending(false);
     }
-  }, [input, sending, chatHistory, addChatMessage]);
+  }, [input, sending, chatHistory, addChatMessage, useWebSearch]);
 
   const handleGenerateQA = useCallback(async () => {
     const trimmed = notesInput.trim();
@@ -284,13 +295,42 @@ export const TutorView = memo(function TutorView() {
               </div>
             ) : (
               chatHistory.map(msg => (
-                <ChatBubble key={msg.id} msg={msg} />
+                <ChatBubble key={msg.id} msg={msg} sources={sourcesByMsg[msg.id] ?? []} />
               ))
             )}
-            {sending && <ChatMessageSkeleton />}
+            {sending && (
+              <div className="flex flex-col gap-2">
+                <ChatMessageSkeleton />
+                {searchingWeb && (
+                  <div className="flex items-center gap-2 text-xs text-accent-600 dark:text-accent-400 pl-2">
+                    <Search size={12} className="animate-pulse" />
+                    Searching the web for references…
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="border-t border-ink-200 dark:border-ink-800 p-3 sm:p-4">
+          <div className="border-t border-ink-200 dark:border-ink-800 p-3 sm:p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={useWebSearch}
+                onClick={() => setUseWebSearch(v => !v)}
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all border ${
+                  useWebSearch
+                    ? 'bg-accent-50 border-accent-200 text-accent-700 dark:bg-accent-900/30 dark:border-accent-800 dark:text-accent-300'
+                    : 'bg-white border-ink-200 text-ink-500 dark:bg-ink-900 dark:border-ink-800 dark:text-ink-400'
+                }`}
+              >
+                <Globe size={13} aria-hidden="true" />
+                {useWebSearch ? 'Web search ON' : 'Web search OFF'}
+              </button>
+              <p id="chat-hint" className="text-[10px] text-ink-400 hidden sm:block">
+                Press Enter to send, Shift+Enter for newline
+              </p>
+            </div>
             <label htmlFor="chat-input" className="sr-only">Type your message</label>
             <div className="flex items-end gap-2">
               <textarea
@@ -313,9 +353,6 @@ export const TutorView = memo(function TutorView() {
                 <Send size={16} aria-hidden="true" />
               </button>
             </div>
-            <p id="chat-hint" className="text-[10px] text-ink-400 mt-1.5 hidden sm:block">
-              Press Enter to send, Shift+Enter for newline
-            </p>
           </div>
         </section>
 
@@ -649,7 +686,13 @@ export const TutorView = memo(function TutorView() {
   );
 });
 
-const ChatBubble = memo(function ChatBubble({ msg }: { msg: ChatMessage }) {
+const ChatBubble = memo(function ChatBubble({
+  msg,
+  sources = [],
+}: {
+  msg: ChatMessage;
+  sources?: WebSearchResult[];
+}) {
   const isUser = msg.role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-slide-up`}>
@@ -666,16 +709,46 @@ const ChatBubble = memo(function ChatBubble({ msg }: { msg: ChatMessage }) {
             ? <span className="text-xs font-bold">You</span>
             : <Brain size={16} />}
         </div>
-        <div
-          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
+        <div className="flex flex-col gap-1.5">
+          <div
+            className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
             isUser
               ? 'bg-primary-600 text-white rounded-tr-sm'
               : 'bg-ink-100 dark:bg-ink-800 text-ink-800 dark:text-ink-200 rounded-tl-sm'
           }`}
-          role={isUser ? undefined : 'article'}
-          aria-label={isUser ? undefined : 'Tutor response'}
-        >
-          {msg.content}
+            role={isUser ? undefined : 'article'}
+            aria-label={isUser ? undefined : 'Tutor response'}
+          >
+            {msg.content}
+          </div>
+          {!isUser && sources.length > 0 && (
+            <div className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white/60 dark:bg-ink-900/60 px-3 py-2 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-accent-600 dark:text-accent-400">
+                <Globe size={12} aria-hidden="true" />
+                Web references
+              </div>
+              <ul className="space-y-1">
+                {sources.map((src, idx) => (
+                  <li key={`${msg.id}-src-${idx}`} className="text-[11px] leading-snug">
+                    <a
+                    href={src.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-start gap-1.5 text-ink-700 dark:text-ink-300 hover:text-primary-700 dark:hover:text-primary-300"
+                  >
+                    <span className="font-medium">
+                      [{idx + 1}] {src.title}
+                    </span>
+                    <ExternalLink size={11} className="mt-0.5 opacity-70 group-hover:opacity-100" />
+                  </a>
+                  {src.snippet && (
+                    <p className="text-ink-500 dark:text-ink-400 line-clamp-2">{src.snippet}</p>
+                  )}
+                </li>
+              ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </div>

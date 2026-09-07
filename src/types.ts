@@ -1,6 +1,22 @@
-export type Domain = 'mathematics' | 'python' | 'data-science';
+export type Domain =
+  | 'mathematics'
+  | 'python'
+  | 'data-science'
+  | 'data-structures'
+  | 'algorithms'
+  | 'operating-systems'
+  | 'dbms'
+  | 'computer-networks'
+  | 'object-oriented-programming'
+  | 'web-development'
+  | 'machine-learning'
+  | 'cyber-security'
+  | 'compiler-design'
+  | 'software-engineering';
 
-export type Difficulty = 'Beginner' | 'Novice' | 'Intermediate' | 'Advanced' | 'Mastery';
+export type Difficulty = 'Beginner' | 'Intermediate' | 'Expert';
+
+export const CORE_DIFFICULTIES: Difficulty[] = ['Beginner', 'Intermediate', 'Expert'];
 
 export interface Question {
   id: string;
@@ -95,5 +111,39 @@ export interface StudentTrendPoint {
   mastery: number;
 }
 
+export interface DailyActivity {
+  date: string;
+  answered: number;
+  correct: number;
+  wrong: number;
+  timeSpentMs: number;
+  domainsPartial: Partial<Record<Domain, number>>;
+}
+
 export type View = 'dashboard' | 'quiz' | 'tutor' | 'analytics';
 export type Theme = 'light' | 'dark';
+
+export interface Student {
+  id: string;
+  name: string;
+  email: string;
+  grade?: string;
+  createdAt: number;
+  lastLoginAt: number;
+  avatarInitial: string;
+}
+
+export type GradeBand =
+  | 'Grade 6-8'
+  | 'Grade 9-10'
+  | 'Grade 11-12'
+  | 'Undergraduate'
+  | 'Professional';
+
+export const GRADE_BANDS: GradeBand[] = [
+  'Grade 6-8',
+  'Grade 9-10',
+  'Grade 11-12',
+  'Undergraduate',
+  'Professional',
+];

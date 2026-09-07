@@ -15,13 +15,15 @@ interface DifficultyBadgeProps {
 }
 
 export function DifficultyBadge({ difficulty, showLevel = true }: DifficultyBadgeProps) {
-  const meta = DIFFICULTY_META[difficulty];
+  const safeDifficulty: Difficulty =
+    DIFFICULTY_META[difficulty] ? difficulty : 'Beginner';
+  const meta = DIFFICULTY_META[safeDifficulty];
   const colorClass = COLOR_MAP[meta.color] ?? COLOR_MAP.primary;
 
   return (
     <span className={`badge ${colorClass}`}>
       <span className="flex h-1.5 w-1.5 rounded-full bg-current" />
-      {difficulty}
+      {safeDifficulty}
       {showLevel && <span className="opacity-60">· Lv{meta.level}</span>}
     </span>
   );

@@ -17,6 +17,17 @@ const DOMAIN_COLORS: Record<Domain, string> = {
   mathematics: '#6366f1',
   python: '#06b6d4',
   'data-science': '#22c55e',
+  'data-structures': '#8b5cf6',
+  algorithms: '#ef4444',
+  'operating-systems': '#f59e0b',
+  dbms: '#06b6d4',
+  'computer-networks': '#22c55e',
+  'object-oriented-programming': '#6366f1',
+  'web-development': '#ec4899',
+  'machine-learning': '#ef4444',
+  'cyber-security': '#f59e0b',
+  'compiler-design': '#14b8a6',
+  'software-engineering': '#6366f1',
 };
 
 export const Dashboard = memo(function Dashboard() {
@@ -150,7 +161,7 @@ export const Dashboard = memo(function Dashboard() {
               />
             </div>
             <div className="flex flex-col items-center gap-2">
-              <ProgressRing percentage={(activeDp.masteryLevel / 5) * 100} color="#f59e0b" label="Mastery" size={110} />
+              <ProgressRing percentage={(activeDp.masteryLevel / 3) * 100} color="#f59e0b" label="Mastery" size={110} />
             </div>
           </div>
 

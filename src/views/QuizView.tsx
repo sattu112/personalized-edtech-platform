@@ -1,13 +1,13 @@
 import { useState, useMemo, useCallback, memo } from 'react';
-import { CheckCircle2, XCircle, Clock, Brain, ArrowRight, ArrowLeft, RefreshCw, Lightbulb, TrendingUp, TrendingDown, Sparkles, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Brain, ArrowRight, ArrowLeft, RefreshCw, Lightbulb, TrendingUp, TrendingDown, Sparkles, Loader2, Wand2, SlidersHorizontal, Check } from 'lucide-react';
 import { DiagnosticSkeleton } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { DifficultyBadge } from '../components/DifficultyBadge';
 import { ProgressRing } from '../components/ProgressRing';
-import { DOMAINS, DIFFICULTIES, DIFFICULTY_META } from '../data/domains';
+import { DOMAINS, DIFFICULTIES, DIFFICULTY_META, levelFromDifficulty, difficultyFromLevel } from '../data/domains';
 import { QUESTION_BANK, getQuestionsByDomainAndDifficulty } from '../data/questionBank';
-import { analyzeGaps, hasGroqApiKey, getApiStatus } from '../utils/groqService';
-import type { Question, QuizResult, Domain, GapAnalysis } from '../types';
+import { analyzeGaps, hasGroqApiKey, getApiStatus, generateQuiz } from '../utils/groqService';
+import type { Question, QuizResult, Domain, GapAnalysis, Difficulty } from '../types';
 
 type QuizPhase = 'select' | 'active' | 'feedback' | 'results';
 
@@ -15,6 +15,17 @@ const DOMAIN_COLORS: Record<Domain, string> = {
   mathematics: '#6366f1',
   python: '#06b6d4',
   'data-science': '#22c55e',
+  'data-structures': '#8b5cf6',
+  algorithms: '#ef4444',
+  'operating-systems': '#f59e0b',
+  dbms: '#06b6d4',
+  'computer-networks': '#22c55e',
+  'object-oriented-programming': '#6366f1',
+  'web-development': '#06b6d4',
+  'machine-learning': '#ef4444',
+  'cyber-security': '#f59e0b',
+  'compiler-design': '#22c55e',
+  'software-engineering': '#6366f1',
 };
 
 const QUIZ_LENGTH = 5;
@@ -32,6 +43,12 @@ export const QuizView = memo(function QuizView() {
   const [gapResult, setGapResult] = useState<GapAnalysis | null>(null);
   const [difficultyChange, setDifficultyChange] = useState<{ from: string; to: string; direction: 'up' | 'down' | 'same' } | null>(null);
 
+  const [genDomain, setGenDomain] = useState<Domain>('algorithms');
+  const [genDifficulty, setGenDifficulty] = useState<Difficulty>('Beginner');
+  const [genCount, setGenCount] = useState<number>(5);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+
   const currentQuestion = questions[currentIdx];
   const currentDp = domainProgress[activeDomain];
 
@@ -44,6 +61,10 @@ export const QuizView = memo(function QuizView() {
       pool = [...pool, ...otherDifficulties];
     }
     const selected = pool.slice(0, QUIZ_LENGTH);
+    if (selected.length === 0) {
+      void runGenerate(domain, dp.currentDifficulty, QUIZ_LENGTH, true);
+      return;
+    }
     setQuestions(selected);
     setResults([]);
     setCurrentIdx(0);
@@ -53,7 +74,49 @@ export const QuizView = memo(function QuizView() {
     setQuestionStartTime(Date.now());
     setGapResult(null);
     setDifficultyChange(null);
+    setGenError(null);
   }, [setActiveDomain, domainProgress]);
+
+  const runGenerate = useCallback(async (
+    domain: Domain,
+    difficulty: Difficulty,
+    count: number,
+    switchToActive: boolean = false
+  ) => {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const generated = await generateQuiz(domain, difficulty, count);
+      if (generated.length === 0) throw new Error('Generator returned empty set.');
+      if (switchToActive) {
+        setActiveDomain(domain);
+        setQuestions(generated);
+        setResults([]);
+        setCurrentIdx(0);
+        setSelectedIdx(null);
+        setShowFeedback(false);
+        setPhase('active');
+        setQuestionStartTime(Date.now());
+        setGapResult(null);
+        setDifficultyChange(null);
+      } else {
+        setActiveDomain(domain);
+        setQuestions(generated);
+        setResults([]);
+        setCurrentIdx(0);
+        setSelectedIdx(null);
+        setShowFeedback(false);
+        setPhase('active');
+        setQuestionStartTime(Date.now());
+        setGapResult(null);
+        setDifficultyChange(null);
+      }
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : 'Failed to generate quiz. Please retry.');
+    } finally {
+      setGenerating(false);
+    }
+  }, [setActiveDomain]);
 
   const selectAnswer = useCallback((idx: number) => {
     if (showFeedback) return;
@@ -97,13 +160,16 @@ export const QuizView = memo(function QuizView() {
 
     const oldDifficulty = domainProgress[activeDomain].currentDifficulty;
     adjustDifficulty(activeDomain, accuracy);
-    const newDifficultyLevel = (() => {
-      const oldLevel = DIFFICULTIES.indexOf(oldDifficulty as typeof DIFFICULTIES[number]) + 1;
-      if (accuracy > 80 && oldLevel < 5) return DIFFICULTIES[oldLevel];
-      if (accuracy < 50 && oldLevel > 1) return DIFFICULTIES[oldLevel - 2];
-      return oldDifficulty;
-    })();
-    setDifficultyChange({ from: oldDifficulty, to: newDifficultyLevel, direction: newDifficultyLevel === oldDifficulty ? 'same' : DIFFICULTIES.indexOf(newDifficultyLevel as typeof DIFFICULTIES[number]) > DIFFICULTIES.indexOf(oldDifficulty as typeof DIFFICULTIES[number]) ? 'up' : 'down' });
+    const oldLevel = levelFromDifficulty(oldDifficulty);
+    const newLevel = accuracy > 80 && oldLevel < 3 ? oldLevel + 1
+      : accuracy < 50 && oldLevel > 1 ? oldLevel - 1
+      : oldLevel;
+    const newDifficultyLevel = difficultyFromLevel(newLevel);
+    setDifficultyChange({
+      from: oldDifficulty,
+      to: newDifficultyLevel,
+      direction: newLevel > oldLevel ? 'up' : newLevel < oldLevel ? 'down' : 'same',
+    });
 
     if (wrongAnswers.length > 0) {
       setAnalyzing(true);
@@ -129,54 +195,165 @@ export const QuizView = memo(function QuizView() {
   // ---- Select phase ----
   if (phase === 'select') {
     return (
-      <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-        <div className="text-center">
+      <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
+        <div className="text-center mb-4">
           <h1 className="text-2xl sm:text-3xl font-bold text-ink-900 dark:text-ink-100">Adaptive Quiz Engine</h1>
           <p className="text-ink-500 dark:text-ink-400 mt-2 text-sm">
-            Choose a subject. Difficulty adapts to your performance automatically.
+            Start an adaptive practice quiz or generate a Groq AI custom quiz by subject & difficulty.
           </p>
         </div>
 
-        <div className="grid gap-4">
-          {DOMAINS.map(d => {
-            const dp = domainProgress[d.id as Domain];
-            return (
-              <button
-                key={d.id}
-                onClick={() => startQuiz(d.id as Domain)}
-                className="card p-5 text-left hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all group"
-              >
-                <div className="flex items-center gap-4">
-                  <ProgressRing
-                    percentage={dp.completionPct}
-                    size={64}
-                    strokeWidth={6}
-                    color={DOMAIN_COLORS[d.id as Domain]}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-ink-900 dark:text-ink-100">{d.label}</h3>
-                      <DifficultyBadge difficulty={dp.currentDifficulty} />
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-start">
+          <div className="lg:col-span-3 space-y-4">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-ink-500 dark:text-ink-400 flex items-center gap-2">
+              <Brain size={15} /> Curriculum Bank (Adaptive by mastery)
+            </h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {DOMAINS.map(d => {
+                const dp = domainProgress[d.id as Domain];
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => startQuiz(d.id as Domain)}
+                    className="card p-4 text-left hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ProgressRing
+                        percentage={dp.completionPct}
+                        size={56}
+                        strokeWidth={6}
+                        color={DOMAIN_COLORS[d.id as Domain] ?? '#6366f1'}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                          <h3 className="font-bold text-ink-900 dark:text-ink-100 text-sm">{d.label}</h3>
+                          <DifficultyBadge difficulty={dp.currentDifficulty} small />
+                        </div>
+                        <p className="text-xs text-ink-500 dark:text-ink-400 line-clamp-2">{d.description}</p>
+                        <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1">
+                          {dp.questionsAnswered} answered · {dp.completionPct}% complete
+                        </p>
+                      </div>
+                      <ArrowRight size={18} className="text-ink-300 dark:text-ink-600 group-hover:text-primary-500 transition-colors flex-shrink-0" />
                     </div>
-                    <p className="text-sm text-ink-500 dark:text-ink-400">{d.description}</p>
-                    <p className="text-xs text-ink-400 dark:text-ink-500 mt-1">
-                      {dp.questionsAnswered} answered · {dp.questionsCorrect} correct · {dp.completionPct}% complete
-                    </p>
-                  </div>
-                  <ArrowRight size={20} className="text-ink-300 dark:text-ink-600 group-hover:text-primary-500 transition-colors flex-shrink-0" />
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-        <div className="card p-4 flex items-center gap-3">
-          <Sparkles size={18} className="text-primary-500 flex-shrink-0" />
-          <p className="text-sm text-ink-600 dark:text-ink-400">
-            {hasGroqApiKey()
-              ? `AI gap analysis active (${getApiStatus().provider}) — wrong answers analyzed by LLM for personalized remediation.`
-              : 'Running in demo mode — AI gap analysis uses intelligent mock responses. Add VITE_GROQ_API_KEY for live LLM analysis. Get one free at console.groq.com'}
-          </p>
+          <div className="lg:col-span-2 space-y-4 lg:sticky lg:top-28">
+            <div className="card p-5 gradient-border-primary relative overflow-hidden">
+              <div className="absolute -top-16 -right-10 w-40 h-40 rounded-full bg-gradient-to-br from-primary-500/20 to-accent-500/10 blur-3xl pointer-events-none" />
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-ink-500 dark:text-ink-400 flex items-center gap-2">
+                  <Wand2 size={15} /> Groq AI Quiz Generator
+                </h2>
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${hasGroqApiKey() ? 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400' : 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400'}`}>
+                  {hasGroqApiKey() ? 'LIVE GROQ' : 'SIMULATED BANK'}
+                </span>
+              </div>
+              <p className="text-xs text-ink-500 dark:text-ink-400 mb-4 leading-relaxed">
+                Generate a targeted CSE assessment — custom subject, difficulty, and count. If Groq is missing, it falls back to a curated 150-question mock bank instantly.
+              </p>
+
+              <div className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-ink-600 dark:text-ink-300 mb-1.5 flex items-center gap-1.5">
+                    <SlidersHorizontal size={12} /> Subject
+                  </label>
+                  <select
+                    value={genDomain}
+                    onChange={e => setGenDomain(e.target.value as Domain)}
+                    className="input-field"
+                  >
+                    {DOMAINS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-ink-600 dark:text-ink-300 mb-2">Difficulty</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['Beginner', 'Intermediate', 'Expert'] as Difficulty[]).map(diff => {
+                      const active = genDifficulty === diff;
+                      const meta = DIFFICULTY_META[diff];
+                      return (
+                        <button
+                          key={diff}
+                          type="button"
+                          onClick={() => setGenDifficulty(diff)}
+                          className={`relative rounded-xl py-2.5 px-1 text-[11px] font-bold border transition-all flex flex-col items-center gap-0.5 ${active ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 shadow-sm' : 'border-ink-200 dark:border-ink-700 text-ink-500 dark:text-ink-400 hover:border-ink-300 dark:hover:border-ink-600'}`}
+                        >
+                          <span className="flex items-center gap-1">
+                            {active && <Check size={12} />}
+                            {diff}
+                          </span>
+                          <span className="text-[9px] font-medium opacity-80 uppercase tracking-wider">Lvl {meta.level}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-ink-600 dark:text-ink-300 flex items-center gap-1.5">
+                      Questions
+                    </label>
+                    <span className="text-xs font-bold text-primary-600 dark:text-primary-400">{genCount}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={3}
+                    max={10}
+                    step={1}
+                    value={genCount}
+                    onChange={e => setGenCount(Number(e.target.value))}
+                    className="w-full accent-primary-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-ink-400 dark:text-ink-500 mt-1">
+                    <span>3</span><span>5</span><span>7</span><span>10</span>
+                  </div>
+                </div>
+
+                {genError && (
+                  <div className="rounded-lg border border-error-200 dark:border-error-900/40 bg-error-50 dark:bg-error-900/15 px-3 py-2 text-[11px] text-error-700 dark:text-error-400">
+                    {genError}
+                  </div>
+                )}
+
+                <button
+                  disabled={generating}
+                  onClick={() => void runGenerate(genDomain, genDifficulty, genCount)}
+                  className="w-full btn-primary !py-2.5 text-sm font-semibold justify-center"
+                >
+                  {generating ? (
+                    <span className="inline-flex items-center gap-2 opacity-80">
+                      <Loader2 size={15} className="animate-spin" /> Generating {genCount} questions…
+                    </span>
+                  ) : (
+                    <>
+                      <Sparkles size={15} /> Generate & Start Quiz
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-center text-ink-400 dark:text-ink-500 leading-relaxed">
+                  {hasGroqApiKey()
+                    ? `Powered by ${getApiStatus().model} via Groq Cloud. Results usually under 3s.`
+                    : 'VITE_GROQ_API_KEY not set → uses curated mock CSE question bank. Add key in Vercel env or .env.local for live generation.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="card p-4 flex items-center gap-3">
+              <Sparkles size={17} className="text-primary-500 flex-shrink-0" />
+              <p className="text-xs text-ink-600 dark:text-ink-400 leading-relaxed">
+                {hasGroqApiKey()
+                  ? `AI gap analysis active (${getApiStatus().provider}) — wrong answers analyzed by LLM for personalized micro-learning remediation.`
+                  : 'Demo mode: AI gap analysis uses intelligent mock responses. Live mode enabled by setting VITE_GROQ_API_KEY (free: console.groq.com).'}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     );

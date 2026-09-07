@@ -107,13 +107,31 @@ type ChartTab = 'performance' | 'cohort';
 type MetricTab = 'retention' | 'completion' | 'mastery';
 
 export const AnalyticsView = memo(function AnalyticsView() {
-  const { domainProgress, quizHistory, trends, totalAnswered, overallAccuracy, streak } = useApp();
+  const { domainProgress, quizHistory, trends, totalAnswered, overallAccuracy, streak, dailyActivity } = useApp();
   const [chartTab, setChartTab] = useState<ChartTab>('performance');
   const [metricTab, setMetricTab] = useState<MetricTab>('retention');
   const [isAdminView, setIsAdminView] = useState(true);
 
   const studentTrends = useMemo(() => buildStudentTrends(trends), [trends]);
   const cohortData = useMemo(() => buildDynamicCohort(trends, COHORT_DATA, overallAccuracy), [trends, overallAccuracy]);
+
+  const dailyChartData = useMemo(() => {
+    const dates = Object.keys(dailyActivity).sort().slice(-14);
+    if (dates.length === 0) {
+      return studentTrends.map(t => ({
+        date: t.date,
+        answered: t.questionsAnswered,
+        correct: Math.round((t.accuracy / 100) * t.questionsAnswered),
+        wrong: Math.max(0, t.questionsAnswered - Math.round((t.accuracy / 100) * t.questionsAnswered)),
+      }));
+    }
+    return dates.map(d => ({
+      date: d,
+      answered: dailyActivity[d]!.answered,
+      correct: dailyActivity[d]!.correct,
+      wrong: dailyActivity[d]!.wrong,
+    }));
+  }, [dailyActivity, studentTrends]);
 
   const domainRadarData = useMemo(() => {
     return DOMAINS.map(d => {
@@ -122,7 +140,7 @@ export const AnalyticsView = memo(function AnalyticsView() {
         subject: d.label.replace(' Programming', '').replace('Data Science', 'Data Sci'),
         completion: dp.completionPct,
         accuracy: dp.questionsAnswered > 0 ? Math.round((dp.questionsCorrect / dp.questionsAnswered) * 100) : 0,
-        mastery: (dp.masteryLevel / 5) * 100,
+        mastery: (dp.masteryLevel / 3) * 100,
       };
     });
   }, [domainProgress]);
@@ -259,14 +277,16 @@ export const AnalyticsView = memo(function AnalyticsView() {
               <Activity size={16} className="text-success-500" /> Daily Activity
             </h3>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={studentTrends} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <BarChart data={dailyChartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                 <XAxis dataKey="date" stroke={axisColor} fontSize={11} tickFormatter={(v: string) => v.slice(5)} />
                 <YAxis stroke={axisColor} fontSize={11} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ background: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: '12px', fontSize: '12px' }}
                 />
-                <Bar dataKey="questionsAnswered" fill="#22c55e" radius={[6, 6, 0, 0]} name="Questions Answered" />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
+                <Bar dataKey="answered" fill="#22c55e" radius={[6, 6, 0, 0]} name="Answered" stackId="a" />
+                <Bar dataKey="wrong" fill="#ef4444" radius={[6, 6, 0, 0]} name="Incorrect" stackId="a" />
               </BarChart>
             </ResponsiveContainer>
           </div>

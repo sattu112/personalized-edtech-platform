@@ -1,9 +1,10 @@
 import { lazy, Suspense, useMemo, useState, useEffect } from 'react';
-import { LayoutDashboard, Brain, BarChart3, Sun, Moon, GraduationCap } from 'lucide-react';
+import { LayoutDashboard, Brain, BarChart3, Sun, Moon, GraduationCap, LogOut } from 'lucide-react';
 import { AppProvider, useApp } from './context/AppContext';
 import type { View } from './types';
 import { Toast } from './components/Toast';
 import { getApiStatus } from './utils/groqService';
+import { LoginSignupView } from './views/LoginSignupView';
 
 const Dashboard = lazy(() => import('./views/Dashboard').then(m => ({ default: m.Dashboard })));
 const QuizView = lazy(() => import('./views/QuizView').then(m => ({ default: m.QuizView })));
@@ -28,8 +29,41 @@ function LoadingFallback() {
   );
 }
 
+function StudentChip() {
+  const { currentStudent, logout, totalAnswered, streak } = useApp();
+  if (!currentStudent) return null;
+  return (
+    <div className="flex items-center gap-1.5 sm:gap-2 pl-1 sm:pl-2">
+      <div className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-2xl bg-ink-50 dark:bg-ink-800/60 border border-ink-100 dark:border-ink-800">
+        <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 text-white text-xs font-bold shadow-sm">
+          {currentStudent.avatarInitial}
+        </div>
+        <div className="min-w-0 leading-tight">
+          <p className="text-xs font-semibold text-ink-800 dark:text-ink-200 truncate max-w-[140px]">
+            {currentStudent.name}
+          </p>
+          <p className="text-[10px] text-ink-500 dark:text-ink-400 truncate max-w-[140px]">
+            {totalAnswered} answered · 🔥 {streak.currentStreak}d
+          </p>
+        </div>
+      </div>
+      <div className="sm:hidden flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 text-white text-xs font-bold shadow-sm">
+        {currentStudent.avatarInitial}
+      </div>
+      <button
+        onClick={logout}
+        className="flex items-center justify-center w-9 h-9 rounded-xl text-ink-500 dark:text-ink-400 hover:bg-error-50 dark:hover:bg-error-900/20 hover:text-error-600 dark:hover:text-error-400 transition-colors focus:outline-none focus:ring-2 focus:ring-error-500/30"
+        aria-label="Sign out"
+        title={`Sign out ${currentStudent.name}`}
+      >
+        <LogOut size={16} />
+      </button>
+    </div>
+  );
+}
+
 function App() {
-  const { view, setView, theme, toggleTheme } = useApp();
+  const { view, setView, theme, toggleTheme, currentStudent } = useApp();
   const navItems = useMemo(() => NAV_ITEMS, []);
   const apiStatus = useMemo(() => getApiStatus(), []);
   const [toastVisible, setToastVisible] = useState(false);
@@ -37,6 +71,7 @@ function App() {
   const [toastVariant, setToastVariant] = useState<'success' | 'info' | 'warning'>('info');
 
   useEffect(() => {
+    if (!currentStudent) return;
     const seen = sessionStorage.getItem('adapted_ai_notice_seen');
     if (!seen) {
       if (apiStatus.configured) {
@@ -49,7 +84,22 @@ function App() {
       setToastVisible(true);
       sessionStorage.setItem('adapted_ai_notice_seen', '1');
     }
-  }, [apiStatus.configured]);
+  }, [apiStatus.configured, currentStudent]);
+
+  if (!currentStudent) {
+    return (
+      <>
+        <LoginSignupView />
+        <Toast
+          visible={toastVisible}
+          message={toastMsg}
+          variant={toastVariant}
+          duration={5000}
+          onDismiss={() => setToastVisible(false)}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -74,7 +124,7 @@ function App() {
                 <Brain size={20} />
               </div>
               <div className="hidden sm:block">
-                <span className="text-base font-bold text-ink-900 dark:text-ink-100 tracking-tight">AdaptEd</span>
+                <span className="text-base font-bold text-ink-900 dark:text-ink-100 tracking-tight">AdaptiveMind</span>
                 <span className="text-[10px] text-ink-400 dark:text-ink-500 ml-1.5 font-medium hidden md:inline">AI Learning Platform</span>
               </div>
             </div>
@@ -109,6 +159,7 @@ function App() {
               >
                 {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
               </button>
+              <StudentChip />
             </div>
           </div>
         </div>
